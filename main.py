@@ -16,6 +16,6 @@ api = LastFm()
 
 
 bb = Billboard()
-datalist = bb.get_song_list(2016)
 
-print(datalist[1])
+html = bb.get_song_lyrics('Never be like you', 'Flume featuring Kai')
+print(html)

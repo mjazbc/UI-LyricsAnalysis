@@ -36,6 +36,8 @@ class LastFm:
 class Billboard:
 
     wikiUrl = 'https://en.wikipedia.org/wiki/Billboard_Year-End_Hot_100_singles_of_{}'
+    metroLyricsRootUrl = 'http://www.metrolyrics.com/{0}'
+    metroLyricsSearch = 'http://api.metrolyrics.com/v1//multisearch/all/X-API-KEY/196f657a46afb63ce3fd2015b9ed781280337ea7/format/json?find={}'
 
     def get_song_list(self, year):
         yearUrl = self.wikiUrl.format(year)
@@ -51,6 +53,41 @@ class Billboard:
                 songList += [row]
         
         return songList
+
+    def extract_lyrics(self, lyricsNode):
+        return '\n'.join(verse.text for verse in lyricsNode.find_all('p', {'class' : 'verse'}))
+
+    def search_lyrics(self, track, artist):
+        track = track.replace('-', '+').lower()
+        artist = artist.replace('-', '+').lower()
+        r = requests.get(self.metroLyricsSearch.format(track+'+'+artist))
+
+        jsonResult = json.loads(r.text)
+        url = jsonResult['results']['lyrics']['d'][0]['u']
+
+        lyricsDiv = self.get_lyrics_div(url)
+
+        return self.extract_lyrics(lyricsDiv)
+
+    def get_lyrics_div(self, url):
+        metroUrl = str.format(self.metroLyricsRootUrl, url)
+        r = requests.get(metroUrl)
+        soup = BeautifulSoup(r.text, 'html.parser')
+        return soup.find('div', {'id':'lyrics-body-text'})
+
+    def get_song_lyrics(self, track, artist):
+        track = track.replace(' ', '-').lower()
+        artist = artist.replace(' ', '-').lower()
+        
+        lyricsDiv = self.get_lyrics_div(track+'-lyrics-'+ artist+'.html')
+
+        #Try finding lyrics by url
+        if lyricsDiv:
+            return self.extract_lyrics(lyricsDiv)
+
+        #If url doesn't exist, try search
+        return self.search_lyrics(track, artist)
+    
 
 
 
