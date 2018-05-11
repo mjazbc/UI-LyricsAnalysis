@@ -64,6 +64,8 @@ class Billboard:
 
         if 'featuring' in artist:
             artist = artist[0:artist.index('featuring')-1]
+        elif ' and ' in artist:
+            artist = artist[0:artist.index('and')-1]
 
         r = requests.get(self.metroLyricsSearch.format(track+'+'+artist))
 
@@ -83,6 +85,8 @@ class Billboard:
 
         if 'featuring' in artist:
             artist = artist[0:artist.index('featuring')-1]
+        elif ' and ' in artist:
+            artist = artist[0:artist.index('and')-1]
 
         r = requests.get(self.geniusSearchUrl.format(track+'+'+artist))
 
