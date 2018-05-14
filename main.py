@@ -1,4 +1,4 @@
-from data import LastFm, Billboard
+from data import LastFm, Billboard, TagClassifier
 import csv
 
 
@@ -17,31 +17,18 @@ api = LastFm()
 # print(html)
 
 destination =  open('data/billboard_lyrics_1964-2017_tagged.csv', 'a', encoding = 'utf-8')
-originalData = [line for line in open('data/billboard_lyrics_1964-2017.csv', 'r',  encoding = 'utf-8')][1:]
+originalData = [line for line in open('data/billboard_lyrics_1964-2017_tagged.csv', 'r',  encoding = 'utf-8')][1:]
 songs = csv.reader(originalData, delimiter=',', quotechar='"' )
 
 
+tc = TagClassifier()
 
 for i, row in enumerate(songs):
 
-    artist = row[2]
-    track = row[1]
-    data = api.get_track_toptags(track, artist)
+    tags = row[6:12]
 
+    print(tc.get_genre(tags))
     line= ''
-    if 'toptags' not in data:
-        tags = []
-    else:
-        tags = data['toptags']['tag']
-    if len(tags) > 5:
-       tags = tags[:5]
-
-    for tag in tags:
-        line = line + '"'+tag['name']+'",'
-        
-    if len(tags) < 5:
-        for j in range(5 - len(tags)):
-            line += "NA,"
     
     line = originalData[i].strip()+',' +line[:-1] + '\n'
     destination.write(line)

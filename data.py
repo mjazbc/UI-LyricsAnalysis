@@ -115,8 +115,6 @@ class Billboard:
 
         return lyrics
 
-
-
     def get_song_lyrics(self, track, artist):
         track = track.replace(' ', '-').lower()
         artist = artist.replace(' ', '-').lower()
@@ -137,9 +135,38 @@ class Billboard:
         
         #Try searcing on genius.com
         return self.search_lyrics_genius(track,artist)
-        
-
     
+class TagClassifier:
+
+    genres = ['pop', 'rock', 'soul', 'hiphop', 'dance']
+
+    pop_subgenres = ['female vocalists', 'pop rock']
+    rock_subgenres = ['classic rock', 'garage rock', 'folk rock', 'rock n roll', 'progressive rock', 'alternative rock', 'heavy metal', 'punk rock', 'punk']
+    soul_subgenres = ['jazz', 'motown', 'ballad', 'smooth jazz', 'rnb', 'r&b']
+    hiphop_subgenres = ['hip hop', 'rap']
+    dance_subgenres = ['disco', 'eurodance', 'house', 'electronic', 'trance', 'techno']
+
+    mapping = [pop_subgenres, rock_subgenres, soul_subgenres, hiphop_subgenres, dance_subgenres]
+
+    def get_genre(self, tagsList):
+        for tag in tagsList:
+            tag = self.sanitize(tag)
+
+            if tag in self.genres:
+                return tag
+                
+            generalized = self.generalize(tag)
+            if generalized in self.genres:
+                return generalized
+        return
+
+    def generalize(self, tag):
+        for i, subgenresList in enumerate(self.mapping):
+            if tag in subgenresList:
+                return self.genres[i]
+
+    def sanitize(self, string):
+        return string.replace('-','').lower().strip()
 
 
 
