@@ -23,8 +23,9 @@ class LastFm:
     def call_api(self, method, track, artist):
 
         # Only 1 request per second should be made
-        if time.time() - self.lastcall < 1:
-            time.sleep(time.time() - self.lastcall)
+        # if time.time() - self.lastcall < 1:
+            # time.sleep(time.time() - self.lastcall)
+        time.sleep(1.5)
 
         param = {'method': method, 'track':track, 'artist':artist, 'api_key' : self.apiKey, 'format' : 'json', 'autocorrect':1}
         r = requests.get(self.lastFmUrl, params=param).json()

@@ -9,31 +9,40 @@ import csv
 # print(len(lyrics))
 
 api = LastFm()
-# data = api.get_track_toptags('american idiot', 'green day')
-
-# for tag in data['toptags']['tag'][:3]:
-#     print(tag['name'])
 
 
-bb = Billboard()
+# bb = Billboard()
 
 # html = bb.get_song_lyrics('Never be like you', 'Flume featuring Kai')
 # print(html)
 
-destination = open('data/newlyrics.csv', 'a', encoding = 'utf-8')
-with open('data/newsongs.csv', 'r') as csvfile:
-    songs = csv.reader(csvfile, delimiter=',', quotechar='"')
-    for i, row in enumerate(songs):
-        if i < 116:
-            continue
+destination =  open('data/billboard_lyrics_1964-2017_tagged.csv', 'a', encoding = 'utf-8')
+originalData = [line for line in open('data/billboard_lyrics_1964-2017.csv', 'r',  encoding = 'utf-8')][1:]
+songs = csv.reader(originalData, delimiter=',', quotechar='"' )
 
-        artist = row[3]
-        track = row[2]
-        lyrics = bb.get_song_lyrics(track,artist)
 
-        if not lyrics:
-            lyrics = "NA"
-        line = row[1]+',"'+track+'","'+artist+'",'+row[0]+',"'+lyrics.replace('\"', '').replace('\n',' ')+'\n'
 
-        destination.write(line)
+for i, row in enumerate(songs):
+
+    artist = row[2]
+    track = row[1]
+    data = api.get_track_toptags(track, artist)
+
+    line= ''
+    if 'toptags' not in data:
+        tags = []
+    else:
+        tags = data['toptags']['tag']
+    if len(tags) > 5:
+       tags = tags[:5]
+
+    for tag in tags:
+        line = line + '"'+tag['name']+'",'
+        
+    if len(tags) < 5:
+        for j in range(5 - len(tags)):
+            line += "NA,"
+    
+    line = originalData[i].strip()+',' +line[:-1] + '\n'
+    destination.write(line)
 
