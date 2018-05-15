@@ -138,15 +138,16 @@ class Billboard:
     
 class TagClassifier:
 
-    genres = ['pop', 'rock', 'soul', 'hiphop', 'dance']
+    genres = ['pop', 'rock', 'soul', 'hiphop', 'dance', 'country']
 
     pop_subgenres = ['female vocalists', 'pop rock']
     rock_subgenres = ['classic rock', 'garage rock', 'folk rock', 'rock n roll', 'progressive rock', 'alternative rock', 'heavy metal', 'punk rock', 'punk']
     soul_subgenres = ['jazz', 'motown', 'ballad', 'smooth jazz', 'rnb', 'r&b']
     hiphop_subgenres = ['hip hop', 'rap']
     dance_subgenres = ['disco', 'eurodance', 'house', 'electronic', 'trance', 'techno']
+    country_subgenres = ['country music']
 
-    mapping = [pop_subgenres, rock_subgenres, soul_subgenres, hiphop_subgenres, dance_subgenres]
+    mapping = [pop_subgenres, rock_subgenres, soul_subgenres, hiphop_subgenres, dance_subgenres, country_subgenres ]
 
     def get_genre(self, tagsList):
         for tag in tagsList:

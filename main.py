@@ -26,10 +26,32 @@ tc = TagClassifier()
 for i, row in enumerate(songs):
 
     tags = row[6:12]
-
-    print(tc.get_genre(tags))
-    line= ''
+    era =''
+    year = int(row[3])
     
-    line = originalData[i].strip()+',' +line[:-1] + '\n'
+    tag = 'other'
+    if all(tag == 'NA' for tag in tags):
+        tag = 'NA'
+    else:
+        g = tc.get_genre(tags)
+        if g:
+            tag = g
+
+    
+    if year < 1970:
+        era = '60s'
+    elif year < 1980:
+        era = '70s'
+    elif year < 1990:
+        era = '80s'
+    elif year < 2000:
+        era = '90s'
+    elif year < 2010:
+        era = '2000s'
+    elif year < 2020:
+        era = '2010s'
+        
+    
+    line = originalData[i].strip()+',' +tag + ',' +era + '\n'
     destination.write(line)
 
