@@ -1,4 +1,5 @@
 import random
+import time
 from collections import Counter
 
 import pandas as pd
@@ -22,14 +23,14 @@ def prepare_data(path, columns):
     # remove rows that are duplicates by song and artist
     df = _df.loc[mask].drop(columns=drop_columns).drop_duplicates(subset=drop_duplicates_by_columns)
     filtered = 1. - (float(len(df)) / len(_df))
-    print "removed %.2f%% rows" % (round(filtered, 5) * 100)
-    print len(_df)
-    print len(df)
+    print("removed %.2f%% rows" % (round(filtered, 5) * 100))
+    print(len(_df))
+    print(len(df))
 
     # hist = _df.lyrics.str.len().diff().hist()
     # plt.show()
-    hist2 = df.lyrics.str.len().diff().hist()
-    plt.show()
+    # hist2 = df.lyrics.str.len().diff().hist()
+    # plt.show()
     return df
 
 
@@ -52,7 +53,7 @@ def get_matrix(data, k):
         t = tuples(lyric, k)  # create generator
         tmp = Counter(t)  # and count all tuples
         temp.append(tmp)  # append it to temporary list for later
-        triples += tmp.keys()  # and save keys in another list
+        triples += list(tmp.keys())  # and save keys in another list
 
     triples = set(triples)  # unique all keys (tuples from every language)
 
@@ -65,7 +66,7 @@ def get_matrix(data, k):
 def run_clustering(df, matrix, rnd, k, year):
     """Run hierarchical clustering using scipy."""
     rnd = min(len(df), rnd)
-    random_100 = random.sample(range(len(df)), rnd)
+    random_100 = random.sample(list(range(len(df))), rnd)
     lbls = np.array([df.iloc[i].song + " " + df.iloc[i].genre for i in random_100])
     z = linkage(np.array(matrix)[random_100], 'average', 'cosine')
     dendrogram(z, labels=lbls, orientation='right')
@@ -74,8 +75,9 @@ def run_clustering(df, matrix, rnd, k, year):
 
 
 if __name__ == "__main__":
+    t1 = time.time()
     # settings
-    k = 4
+    k = 3
     year = -1  # use -1 for all
     rnd = 100
 
@@ -86,12 +88,17 @@ if __name__ == "__main__":
         df = df.loc[df.year == year]
 
     # print this to assert data makes sense
-    print pd.unique(df.genre.values)
-    print pd.unique(df.era.values)
-    print pd.unique(df.year.values)
+    print(pd.unique(df.genre.values))
+    print(pd.unique(df.era.values))
+    print(pd.unique(df.year.values))
 
     matrix = get_matrix(df, k)
 
-    print "matrix done"
+    matrix_df = pd.DataFrame(matrix)
+    matrix_df.to_csv("data/data-k%d-filtered.csv" % k)
+
+    print("matrix done")
 
     run_clustering(df, matrix, rnd, k, year)
+
+    print(time.time() - t1)
