@@ -10,8 +10,9 @@ import numpy as np
 from nltk.tokenize import TweetTokenizer
 from scipy.sparse import csr_matrix, hstack
 from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.decomposition import PCA
+from sklearn import decomposition
 from sklearn.cluster import KMeans
+import matplotlib
 
 
 def prepare_data(path, columns, save_to_path):
@@ -56,26 +57,12 @@ def word_tuples(s, k):
     for i in range(len(s) - k + 1):
         yield ' '.join(s[i:i + k])
 
-
-
 def get_matrix(data, k):
     t1 = time.time()
-    """Get matrix for calculating distances."""
-    triples = []
-    temp = []
-
-    # list of text documents
-    # text = ["The quick brown fox jumped over the lazy dog."]
-    # create the transform
     vectorizer = CountVectorizer(ngram_range=(1,k))
-    # tokenize and build vocab
     vectorizer.fit(data.lyrics)
-    # summarize
-    print(vectorizer.vocabulary_)
-    # encode document
     vector = vectorizer.transform(data.lyrics)
-    # summarize encoded vector
-    print(vector.shape)
+    print('Vectorization:\t',time.time() -t1)
     return vector
 
 def run__hierarchical_clustering(df, k, year):
@@ -92,53 +79,28 @@ def run__hierarchical_clustering(df, k, year):
 
 def run_kmeans(df, k):
 
-    data = get_matrix(df, 1).toarray()
+    data = get_matrix(df, 3)
+    data = data.asfptype()
 
     n_samples, n_features = data.shape
     n_digits = 6
-    labels = df.genre
+    labels = list(df.genre)
+    unique_labels = set(labels)
 
-    print(82 * '_')
-
-    # #############################################################################
-    # Visualize the results on PCA-reduced data
-
-    reduced_data = PCA(n_components=2).fit_transform(data)
+    #reduce dimensions to enable plotting
+    svd = decomposition.TruncatedSVD(n_components=2, algorithm='arpack')
+    svd.fit(data)
+    reduced_data = svd.transform(data)
+    print('Expl. variance:\t',sum(svd.explained_variance_ratio_)*100, '%')
     kmeans = KMeans(init='k-means++', n_clusters=n_digits, n_init=10)
     kmeans.fit(reduced_data)
 
-    # Step size of the mesh. Decrease to increase the quality of the VQ.
-    h = .02     # point in the mesh [x_min, x_max]x[y_min, y_max].
+    palette = matplotlib.cm.rainbow(np.linspace(0, 1, len(unique_labels)))
+    color_dict = {color:label for color, label in zip(unique_labels, palette)}
+    colors = [color_dict[label] for label in labels]
 
-    # Plot the decision boundary. For that, we will assign a color to each
-    x_min, x_max = reduced_data[:, 0].min() - 1, reduced_data[:, 0].max() + 1
-    y_min, y_max = reduced_data[:, 1].min() - 1, reduced_data[:, 1].max() + 1
-    xx, yy = np.meshgrid(np.arange(x_min, x_max, h), np.arange(y_min, y_max, h))
-
-    # Obtain labels for each point in mesh. Use last trained model.
-    Z = kmeans.predict(np.c_[xx.ravel(), yy.ravel()])
-
-    # Put the result into a color plot
-    Z = Z.reshape(xx.shape)
-    plt.figure(1)
-    plt.clf()
-    plt.imshow(Z, interpolation='nearest',
-            extent=(xx.min(), xx.max(), yy.min(), yy.max()),
-            cmap=plt.cm.Paired,
-            aspect='auto', origin='lower')
-
-    plt.plot(reduced_data[:, 0], reduced_data[:, 1], 'k.', markersize=2)
-    # Plot the centroids as a white X
-    centroids = kmeans.cluster_centers_
-    plt.scatter(centroids[:, 0], centroids[:, 1],
-                marker='x', s=169, linewidths=3,
-                color='w', zorder=10)
-    plt.title('K-means clustering on the digits dataset (PCA-reduced data)\n'
-            'Centroids are marked with white cross')
-    plt.xlim(x_min, x_max)
-    plt.ylim(y_min, y_max)
-    plt.xticks(())
-    plt.yticks(())
+    plt.scatter(reduced_data[:,0],reduced_data[:,1], c=colors)
+    # plt.legend(ncol = 3,  loc='lower right',)
     plt.show()
 
 if __name__ == "__main__":
