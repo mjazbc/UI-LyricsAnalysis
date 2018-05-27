@@ -18,6 +18,8 @@ from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import cross_val_predict
 from sklearn.preprocessing import normalize
 from sklearn.svm import LinearSVC
+import matplotlib.pyplot as plt
+
 
 nltk.download('averaged_perceptron_tagger')
 nltk.download('vader_lexicon')
@@ -35,6 +37,25 @@ def load_obj(path):
     return pickle.load(open(path, 'rb'))
 
 
+def plot_cm(cm, labels, classifier, normalize=True):
+
+    print(cm)
+    
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]  # normalize rows
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    cax = ax.matshow(cm)
+    plt.title('Confusion matrix of ' +classifier+' classifier')
+    fig.colorbar(cax)
+    ax.set_xticklabels([''] + cm_labels)
+    ax.set_yticklabels([''] + cm_labels)
+    plt.xlabel('Predicted')
+    plt.ylabel('True')
+    plt.show()
+
+
 class LyricsAnalysis:
     def __init__(self, fp):
         """
@@ -47,10 +68,12 @@ class LyricsAnalysis:
         self.tokenized = {}
 
         df = pd.read_csv(fp, delimiter=";")
+        print(len(df))
         df = df[df.genre != 'other']
         print(len(df))
         print(df['genre'].value_counts())
         self.corpus = pd.Series(df.lyrics.values).to_dict()
+        self.labels = list(set(df.genre))
         le = preprocessing.LabelEncoder().fit(df.genre)
         self.y = le.transform(df.genre)
         self.text = list(df.lyrics.values)
@@ -88,7 +111,7 @@ class LyricsAnalysis:
 
         return res
 
-    #### SENTIMENT
+    # SENTIMENT
 
     def connect_negated(self, tokenized_text):
         if not negated(tokenized_text):
@@ -118,7 +141,8 @@ class LyricsAnalysis:
         res = list()
         for id, text in self.tokenized.items():
             text = self.connect_negated(text)
-            scores = [self.sid.polarity_scores(word)['compound'] for word in text]
+            scores = [self.sid.polarity_scores(
+                word)['compound'] for word in text]
             if not scores:
                 res.append([0, 0, 0])
                 continue
@@ -134,7 +158,7 @@ class LyricsAnalysis:
 
         return csr_matrix(res)
 
-    #### LEXICAL
+    # LEXICAL
 
     def character_flooding(self):
         # res = [[0] for x in range(len(self.tokenized))]
@@ -153,7 +177,8 @@ class LyricsAnalysis:
     def punctuation_flooding(self):
         # res = [[0] for x in range(len(self.tokenized))]
         res = csr_matrix((len(self.tokenized), 1))
-        regex = re.compile(r'([.\?#@+,<>%~`!$^&\(\):;]|[.\?#@+,<>%~`!$^&\(\):;]\s)\1+')
+        regex = re.compile(
+            r'([.\?#@+,<>%~`!$^&\(\):;]|[.\?#@+,<>%~`!$^&\(\):;]\s)\1+')
 
         for id, text in self.corpus.items():
             is_flooded = 0
@@ -192,7 +217,8 @@ class LyricsAnalysis:
                 text = self.text[id]
 
             for kmer in list(self.kmers(text, k=k)):
-                res[id, kmer_dict[kmer]] = 1  # row is id of a text, column is value in kmer_dict for this kmer
+                # row is id of a text, column is value in kmer_dict for this kmer
+                res[id, kmer_dict[kmer]] = 1
 
         return res
 
@@ -203,7 +229,7 @@ class LyricsAnalysis:
             cntr[1, id] = len(set(tokenizer(lrcs)))
         return normalize(cntr, axis=0)
 
-    ### FEATURIZING
+    # FEATURIZING
 
     def featurize(self):
         '''
@@ -216,30 +242,11 @@ class LyricsAnalysis:
         vectorizer = TfidfVectorizer(strip_accents="unicode", analyzer="word", tokenizer=tokenizer,
                                      stop_words="english")
         X = csr_matrix(vectorizer.fit_transform(self.text))
-        print(vectorizer.get_feature_names())  # to manually check if the tokens are reasonable
+        # to manually check if the tokens are reasonable
+        print(vectorizer.get_feature_names())
 
         now = time.time()
-        # check if files obj/*dict exists, if not, generate and save it, else load it
-        # if os.path.isfile("obj/wordunimersdict.pickle"):
-        #     wordUnimersDict = load_obj('obj/wordunimersdict.pickle')
-        # else:
-        #     wordUnimersDict = self.kmers_featurize(k=1)
-        #     print("done")
-        #     save_obj(wordUnimersDict, 'obj/wordunimersdict.pickle')
-        # if os.path.isfile("obj/worddimersdict.pickle"):
-        #     wordDimersDict = load_obj('obj/worddimersdict.pickle')
-        # else:
-        #     wordDimersDict = self.kmers_featurize(k=2)
-        #     print("done")
-        #     save_obj(wordDimersDict, 'obj/worddimersdict.pickle')
-        # charTrimersDict = self.kmers_featurize(k=3, elem="char")
-        # charQuamersDict = self.kmers_featurize(k=4, elem="char")
         print('Featurize: ' + '%0.2f' % (time.time() - now))
-
-        # X = hstack([X, wordUnimersDict])
-        # X = hstack([X, wordDimersDict])
-        # X = hstack([X, charTrimersDict])
-        # X = hstack([X, charQuamersDict])
 
         now = time.time()
         floodingCharDict = self.character_flooding()
@@ -250,13 +257,13 @@ class LyricsAnalysis:
         X = hstack([X, floodingPuncDict])
 
         now = time.time()
-        sent = self.sentiment_features()
-        print('Sentimality: ' + '%0.2f' % (time.time() - now))
-        X = hstack([X, sent])
+        # sent = self.sentiment_features()
+        # print('Sentimality: ' + '%0.2f' % (time.time() - now))
+        # X = hstack([X, sent])
 
-        seman = self.semantic_features()
-        print('Semantic: ' + '%0.2f' % (time.time() - now))
-        X = hstack([X, seman])
+        # seman = self.semantic_features()
+        # print('Semantic: ' + '%0.2f' % (time.time() - now))
+        # X = hstack([X, seman])
 
         # add number of words (scaled 0-1)
         # lyrcs_lengths = self.word_counter(tokenizer=tokenizer)
@@ -271,7 +278,7 @@ if __name__ == "__main__":
     print('--- Started ----')
     DATASET_FP = "data/preprocessed.csv"
 
-    K_FOLDS = 5  # 10-fold crossvalidation
+    K_FOLDS = 3  # 10-fold crossvalidation
 
     # Loading dataset and featurised simple Tfidf-BoW model
     idt = LyricsAnalysis(DATASET_FP)
@@ -282,7 +289,8 @@ if __name__ == "__main__":
     class_counts = np.asarray(np.unique(idt.y, return_counts=True)).T.tolist()
     print("Num of classes: ", class_counts)
 
-    algs = [LinearSVC(multi_class="crammer_singer"), RandomForestClassifier(n_estimators=100, n_jobs=-1), svm.SVC()]
+    algs = [LinearSVC(multi_class="crammer_singer"), RandomForestClassifier(
+        n_estimators=100, n_jobs=-1), svm.SVC()]
 
     for CLF in algs:
         print(CLF.__class__.__name__)
@@ -290,17 +298,20 @@ if __name__ == "__main__":
 
         # SVM with created features - currently uses only tokenized words.
         predicted = cross_val_predict(CLF, X, idt.y, cv=K_FOLDS)
-        randpred = np.random.randint(len(np.unique(idt.y)), size=len(predicted))
+        randpred = np.random.randint(
+            len(np.unique(idt.y)), size=len(predicted))
+
+        cm_labels = ['country', 'dance', 'hiphop', 'pop', 'rock', 'soul']
 
         conf_matrix = confusion_matrix(idt.y, predicted)
-        print("confusion matrix")
-        print(conf_matrix)
+        plot_cm(conf_matrix,cm_labels, CLF.__class__.__name__, True)
 
         acc = metrics.accuracy_score(idt.y, randpred)
         prec = metrics.precision_recall_fscore_support(idt.y, randpred)
 
         print("Random classifier:")
-        print('Accuracy', acc, '| Precision', np.mean(prec[0]), '| Recall', np.mean(prec[1]), '| F-score', np.mean(prec[2]))
+        print('Accuracy', acc, '| Precision', np.mean(
+            prec[0]), '| Recall', np.mean(prec[1]), '| F-score', np.mean(prec[2]))
         # Modify F1-score calculation depending on the task
         acc = metrics.accuracy_score(idt.y, predicted)
         prec = metrics.precision_recall_fscore_support(idt.y, predicted)
