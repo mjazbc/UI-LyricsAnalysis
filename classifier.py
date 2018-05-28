@@ -74,16 +74,15 @@ class LyricsAnalysis:
         df = pd.read_csv(fp, delimiter=";")
         print(len(df))
         df = df[df.genre != 'other']
-        # skip 2016 and 2017 due to broken tags/genres
-        df = df[df.year != 2016]
-        df = df[df.year != 2017]
+        # df = df.tail(1000)
         print(len(df))
         print(df[class_name].value_counts())
         self.corpus = pd.Series(df.lyrics.values).to_dict()
         le = preprocessing.LabelEncoder().fit(df[class_name])
         self.y = le.transform(df[class_name])
         self.text = list(df.lyrics.values)
-        self.years = list(df.year.values)
+        self.test = df[df.year >= 2016].id
+        self.train = df[df.year < 2016].id
 
         now = time.time()
         self.ie_preprocess()
@@ -250,26 +249,26 @@ class LyricsAnalysis:
         '''
 
         tokenizer = WhitespaceTokenizer().tokenize
-        wordnet = nltk.WordNetLemmatizer()
-        c = 0
-        c_changed = 0
-        for index, text in enumerate(self.text):
-            build_tmp_text = []
-            for word in tokenizer(text):
-                lem1 = wordnet.lemmatize(word)
-                if word == lem1:
-                    lem2 = wordnet.lemmatize(word, pos='v')
-                    if word == lem2:
-                        build_tmp_text.append(word)
-                    else:
-                        build_tmp_text.append(lem2)
-                        c_changed += 1
-                else:
-                    build_tmp_text.append(lem1)
-                    c_changed += 1
-                c += 1
-            self.text[index] = " ".join(build_tmp_text)
-        print(float(c_changed) / c)
+        # wordnet = nltk.WordNetLemmatizer()
+        # c = 0
+        # c_changed = 0
+        # for index, text in enumerate(self.text):
+        #     build_tmp_text = []
+        #     for word in tokenizer(text):
+        #         lem1 = wordnet.lemmatize(word)
+        #         if word == lem1:
+        #             lem2 = wordnet.lemmatize(word, pos='v')
+        #             if word == lem2:
+        #                 build_tmp_text.append(word)
+        #             else:
+        #                 build_tmp_text.append(lem2)
+        #                 c_changed += 1
+        #         else:
+        #             build_tmp_text.append(lem1)
+        #             c_changed += 1
+        #         c += 1
+        #     self.text[index] = " ".join(build_tmp_text)
+        # print(float(c_changed) / c)
         # TODO: consider max features!!!
         vectorizer = TfidfVectorizer(strip_accents="unicode", analyzer="word", tokenizer=tokenizer,
                                      stop_words="english", ngram_range=(1, 3), max_features=50000)
@@ -325,13 +324,18 @@ if __name__ == "__main__":
     print('--- Started ----')
     DATASET_FP = "data/preprocessed_fixed.csv"
 
-    K_FOLDS = 3  # 10-fold crossvalidation
+    K_FOLDS = 3  # crossvalidation
 
     # Loading dataset and featurised simple Tfidf-BoW model
     idt = LyricsAnalysis(DATASET_FP)
     # corpus, y = idt.parse_dataset_old(DATASET_FP)
 
     X = idt.featurize()
+
+    test = X.tocsr()[:100,:]
+    train = X.tocsr()[len(idt.y) - 100:, :]
+    train_y = idt.y[len(idt.y)-100:] 
+    test_y = idt.y[:100] 
 
     class_counts = np.asarray(np.unique(idt.y, return_counts=True)).T.tolist()
     # print("Num of classes: ", class_counts)
@@ -349,22 +353,25 @@ if __name__ == "__main__":
         # CLF = LinearSVC(multi_class="crammer_singer")  # the default, non-parameter optimized linear-kernel SVM
 
         # SVM with created features - currently uses only tokenized words.
-        predicted = cross_val_predict(CLF, X, idt.y, cv=K_FOLDS, method=method)
+        CLF.fit(train, train_y)
+        predicted = CLF.predict(test)
+
+        # predicted = cross_val_predict(CLF, X, idt.y, cv=K_FOLDS, method=method)
         # print(predicted)
         # sys.exit(1)
         randpred = np.random.randint(
             len(np.unique(idt.y)), size=len(predicted))
 
-        if method == "predict_proba":
-            predicted = get_predict_topn(idt.y, predicted, 2)
+        # if method == "predict_proba":
+        #     predicted = get_predict_topn(test_y, predicted, 2)
 
         cm_labels = ['country', 'dance', 'hiphop', 'pop', 'rock', 'soul']
-        conf_matrix = confusion_matrix(idt.y, predicted)
+        conf_matrix = confusion_matrix(test_y, predicted)
         plot_cm(conf_matrix,cm_labels, CLF.__class__.__name__, True)
 
         # acc = metrics.accuracy_score(idt.y, randpred)
-        acc = metrics.accuracy_score(idt.y, randpred)
-        prec = metrics.precision_recall_fscore_support(idt.y, randpred)
+        acc = metrics.accuracy_score(test_y, randpred)
+        prec = metrics.precision_recall_fscore_support(test_y, randpred)
 
         print("Random classifier:")
         print('Accuracy', acc, '| Precision', np.mean(

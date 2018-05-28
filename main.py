@@ -21,7 +21,7 @@ originalData = [line for line in open('data/preprocessed.csv', 'r',  encoding = 
 destination =  open('data/preprocessed_fixed.csv', 'a', encoding = 'utf-8')
 songs = csv.reader(originalData, delimiter=';', quotechar='"' )
 
-def fix_parsing_fuckups(songs, destination):
+def fix_parsing_errors(songs, destination):
      for i, row in enumerate(songs):
         lyrics = row[4]
         splitWords = wordninja.split(lyrics)
