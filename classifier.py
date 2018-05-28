@@ -6,7 +6,9 @@ import time
 import nltk
 import numpy as np
 import pandas as pd
+import wordninja
 from gensim.models import Word2Vec
+from nltk.corpus import words
 from nltk.sentiment.vader import SentimentIntensityAnalyzer, negated
 from nltk.tokenize import WhitespaceTokenizer
 from scipy.sparse import csr_matrix, hstack
@@ -16,13 +18,14 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import cross_val_predict
-from sklearn.preprocessing import normalize
+from sklearn.preprocessing import normalize, MultiLabelBinarizer, label_binarize
 from sklearn.svm import LinearSVC
 import matplotlib.pyplot as plt
 
 
-nltk.download('averaged_perceptron_tagger')
-nltk.download('vader_lexicon')
+# nltk.download('averaged_perceptron_tagger')
+# nltk.download('vader_lexicon')
+# nltk.download('words')
 
 logging.basicConfig(level=logging.INFO)
 
@@ -64,19 +67,23 @@ class LyricsAnalysis:
         :return:
             corpus: (lyrics id: lyrics text)
         """
+        class_name = "genre"
         self.w2v = {}
         self.tokenized = {}
 
         df = pd.read_csv(fp, delimiter=";")
         print(len(df))
         df = df[df.genre != 'other']
+        # skip 2016 and 2017 due to broken tags/genres
+        df = df[df.year != 2016]
+        df = df[df.year != 2017]
         print(len(df))
-        print(df['genre'].value_counts())
+        print(df[class_name].value_counts())
         self.corpus = pd.Series(df.lyrics.values).to_dict()
-        self.labels = list(set(df.genre))
-        le = preprocessing.LabelEncoder().fit(df.genre)
-        self.y = le.transform(df.genre)
+        le = preprocessing.LabelEncoder().fit(df[class_name])
+        self.y = le.transform(df[class_name])
         self.text = list(df.lyrics.values)
+        self.years = list(df.year.values)
 
         now = time.time()
         self.ie_preprocess()
@@ -223,11 +230,15 @@ class LyricsAnalysis:
         return res
 
     def word_counter(self, tokenizer):
-        cntr = csr_matrix((2, len(self.text)))
+        cntr = csr_matrix((len(self.text), 2))
         for id, lrcs in enumerate(self.text):
-            cntr[0, id] = len(tokenizer(lrcs))
-            cntr[1, id] = len(set(tokenizer(lrcs)))
+            cntr[id, 0] = len(tokenizer(lrcs))
+            cntr[id, 1] = len(set(tokenizer(lrcs)))
         return normalize(cntr, axis=0)
+
+    def get_years(self):
+        years = label_binarize(self.years, list(set(self.years)))
+        return years
 
     # FEATURIZING
 
@@ -239,11 +250,33 @@ class LyricsAnalysis:
         '''
 
         tokenizer = WhitespaceTokenizer().tokenize
+        wordnet = nltk.WordNetLemmatizer()
+        c = 0
+        c_changed = 0
+        for index, text in enumerate(self.text):
+            build_tmp_text = []
+            for word in tokenizer(text):
+                lem1 = wordnet.lemmatize(word)
+                if word == lem1:
+                    lem2 = wordnet.lemmatize(word, pos='v')
+                    if word == lem2:
+                        build_tmp_text.append(word)
+                    else:
+                        build_tmp_text.append(lem2)
+                        c_changed += 1
+                else:
+                    build_tmp_text.append(lem1)
+                    c_changed += 1
+                c += 1
+            self.text[index] = " ".join(build_tmp_text)
+        print(float(c_changed) / c)
+        # TODO: consider max features!!!
         vectorizer = TfidfVectorizer(strip_accents="unicode", analyzer="word", tokenizer=tokenizer,
-                                     stop_words="english")
+                                     stop_words="english", ngram_range=(1, 3), max_features=50000)
         X = csr_matrix(vectorizer.fit_transform(self.text))
+        print(X.shape)
         # to manually check if the tokens are reasonable
-        print(vectorizer.get_feature_names())
+        print(vectorizer.get_feature_names())  # to manually check if the tokens are reasonable
 
         now = time.time()
         print('Featurize: ' + '%0.2f' % (time.time() - now))
@@ -257,9 +290,9 @@ class LyricsAnalysis:
         X = hstack([X, floodingPuncDict])
 
         now = time.time()
-        # sent = self.sentiment_features()
-        # print('Sentimality: ' + '%0.2f' % (time.time() - now))
-        # X = hstack([X, sent])
+        sent = self.sentiment_features()
+        print('Sentimality: ' + '%0.2f' % (time.time() - now))
+        X = hstack([X, sent])
 
         # seman = self.semantic_features()
         # print('Semantic: ' + '%0.2f' % (time.time() - now))
@@ -270,13 +303,27 @@ class LyricsAnalysis:
         # X = hstack([X, lyrcs_lengths])
         # print('word counting: ' + '%0.2f' % (time.time() - now))
 
+        # add year binarized
+        # years = self.get_years()
+        # X = hstack([X, years])
+
         return X
 
+
+def get_predict_topn(y_true, y_pred, topn=2):
+    new_predict = []
+    for row, pred in enumerate(y_pred):
+        top2 = pred.argsort()[-topn:][::-1]
+        if y_true[row] in top2:
+            new_predict.append(y_true[row])
+        else:
+            new_predict.append(top2[0])
+    return np.array(new_predict)
 
 if __name__ == "__main__":
     # Experiment settings
     print('--- Started ----')
-    DATASET_FP = "data/preprocessed.csv"
+    DATASET_FP = "data/preprocessed_fixed.csv"
 
     K_FOLDS = 3  # 10-fold crossvalidation
 
@@ -287,25 +334,35 @@ if __name__ == "__main__":
     X = idt.featurize()
 
     class_counts = np.asarray(np.unique(idt.y, return_counts=True)).T.tolist()
-    print("Num of classes: ", class_counts)
+    # print("Num of classes: ", class_counts)
 
-    algs = [LinearSVC(multi_class="crammer_singer"), RandomForestClassifier(
-        n_estimators=100, n_jobs=-1), svm.SVC()]
+    # method = "predict"
+    method = "predict_proba"
+    if method == "predict_proba":
+        algs = [svm.SVC(kernel='linear', probability=True)]
+    else:
+        algs = [svm.SVC(kernel='linear', probability=False)]
+        # algs = [LinearSVC(multi_class="crammer_singer")]
 
     for CLF in algs:
         print(CLF.__class__.__name__)
         # CLF = LinearSVC(multi_class="crammer_singer")  # the default, non-parameter optimized linear-kernel SVM
 
         # SVM with created features - currently uses only tokenized words.
-        predicted = cross_val_predict(CLF, X, idt.y, cv=K_FOLDS)
+        predicted = cross_val_predict(CLF, X, idt.y, cv=K_FOLDS, method=method)
+        # print(predicted)
+        # sys.exit(1)
         randpred = np.random.randint(
             len(np.unique(idt.y)), size=len(predicted))
 
-        cm_labels = ['country', 'dance', 'hiphop', 'pop', 'rock', 'soul']
+        if method == "predict_proba":
+            predicted = get_predict_topn(idt.y, predicted, 2)
 
+        cm_labels = ['country', 'dance', 'hiphop', 'pop', 'rock', 'soul']
         conf_matrix = confusion_matrix(idt.y, predicted)
         plot_cm(conf_matrix,cm_labels, CLF.__class__.__name__, True)
 
+        # acc = metrics.accuracy_score(idt.y, randpred)
         acc = metrics.accuracy_score(idt.y, randpred)
         prec = metrics.precision_recall_fscore_support(idt.y, randpred)
 
@@ -313,6 +370,7 @@ if __name__ == "__main__":
         print('Accuracy', acc, '| Precision', np.mean(
             prec[0]), '| Recall', np.mean(prec[1]), '| F-score', np.mean(prec[2]))
         # Modify F1-score calculation depending on the task
+        # acc = metrics.accuracy_score(idt.y, predicted)
         acc = metrics.accuracy_score(idt.y, predicted)
         prec = metrics.precision_recall_fscore_support(idt.y, predicted)
 
