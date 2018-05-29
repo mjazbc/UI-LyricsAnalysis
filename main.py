@@ -73,4 +73,4 @@ def set_genres(songs, destination):
         destination.write(line)
 
 
-fix_parsing_fuckups(songs,destination)
+fix_parsing_errors(songs,destination)

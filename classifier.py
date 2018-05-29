@@ -10,7 +10,7 @@ import wordninja
 from gensim.models import Word2Vec
 from nltk.corpus import words
 from nltk.sentiment.vader import SentimentIntensityAnalyzer, negated
-from nltk.tokenize import WhitespaceTokenizer
+from nltk.tokenize import TweetTokenizer
 from scipy.sparse import csr_matrix, hstack
 from sklearn import metrics, preprocessing
 from sklearn import svm
@@ -72,17 +72,15 @@ class LyricsAnalysis:
         self.tokenized = {}
 
         df = pd.read_csv(fp, delimiter=";")
-        print(len(df))
         df = df[df.genre != 'other']
-        # df = df.tail(1000)
-        print(len(df))
+        # df = df.head(1000)
         print(df[class_name].value_counts())
         self.corpus = pd.Series(df.lyrics.values).to_dict()
         le = preprocessing.LabelEncoder().fit(df[class_name])
         self.y = le.transform(df[class_name])
         self.text = list(df.lyrics.values)
-        self.test = df[df.year >= 2016].id
-        self.train = df[df.year < 2016].id
+        
+        self.splitIdx = len(df.index[df.year < 2010])
 
         now = time.time()
         self.ie_preprocess()
@@ -91,7 +89,7 @@ class LyricsAnalysis:
         self.sid = SentimentIntensityAnalyzer()
 
     def ie_preprocess(self):
-        tokenizer = WhitespaceTokenizer()
+        tokenizer = TweetTokenizer(reduce_len=True)
 
         for id, text in self.corpus.items():
             tokenized = tokenizer.tokenize(text)
@@ -146,7 +144,7 @@ class LyricsAnalysis:
     def sentiment_features(self):
         res = list()
         for id, text in self.tokenized.items():
-            text = self.connect_negated(text)
+            # text = self.connect_negated(text)
             scores = [self.sid.polarity_scores(
                 word)['compound'] for word in text]
             if not scores:
@@ -180,59 +178,20 @@ class LyricsAnalysis:
 
         return res
 
-    def punctuation_flooding(self):
-        # res = [[0] for x in range(len(self.tokenized))]
-        res = csr_matrix((len(self.tokenized), 1))
-        regex = re.compile(
-            r'([.\?#@+,<>%~`!$^&\(\):;]|[.\?#@+,<>%~`!$^&\(\):;]\s)\1+')
-
-        for id, text in self.corpus.items():
-            is_flooded = 0
-            match = regex.search(text)
-            if match:
-                is_flooded = 1
-            res[id] = is_flooded
-
-        return res
-
     def kmers(self, s, k=3):
         for i in range(len(s) - k + 1):
             yield tuple(s[i:i + k])
 
-    def kmers_featurize(self, k=2, elem="word"):
-        i = 0
-        kmer_dict = {}
-
-        print("iterate through tokenized items")
-        # build dict
-        for id, text in self.tokenized.items():
-            if elem == "char":
-                text = self.text[id]
-
-            for kmer in list(self.kmers(text, k=k)):
-                if kmer not in kmer_dict:
-                    kmer_dict[kmer] = i
-                    i += 1
-                    print(kmer_dict)
-
-        # featurize
-        res = csr_matrix((len(self.tokenized), len(kmer_dict)))
-
-        for id, text in self.tokenized.items():
-            if elem == "char":
-                text = self.text[id]
-
-            for kmer in list(self.kmers(text, k=k)):
-                # row is id of a text, column is value in kmer_dict for this kmer
-                res[id, kmer_dict[kmer]] = 1
-
-        return res
-
     def word_counter(self, tokenizer):
-        cntr = csr_matrix((len(self.text), 2))
+        cntr = csr_matrix((len(self.text), 3))
         for id, lrcs in enumerate(self.text):
-            cntr[id, 0] = len(tokenizer(lrcs))
-            cntr[id, 1] = len(set(tokenizer(lrcs)))
+            length = len(tokenizer(lrcs))
+            uniq = len(set(tokenizer(lrcs)))
+            cntr[id, 0] = length
+            cntr[id, 1] = uniq
+            cntr[id, 2] = uniq / length #ratio
+        print(cntr[id,2])
+
         return normalize(cntr, axis=0)
 
     def get_years(self):
@@ -247,66 +206,74 @@ class LyricsAnalysis:
         :param corpus: A list of strings each string representing document.
         :return: X: A sparse csr matrix of TFIDF-weigted ngram counts.
         '''
-
-        tokenizer = WhitespaceTokenizer().tokenize
-        # wordnet = nltk.WordNetLemmatizer()
-        # c = 0
-        # c_changed = 0
-        # for index, text in enumerate(self.text):
-        #     build_tmp_text = []
-        #     for word in tokenizer(text):
-        #         lem1 = wordnet.lemmatize(word)
-        #         if word == lem1:
-        #             lem2 = wordnet.lemmatize(word, pos='v')
-        #             if word == lem2:
-        #                 build_tmp_text.append(word)
-        #             else:
-        #                 build_tmp_text.append(lem2)
-        #                 c_changed += 1
-        #         else:
-        #             build_tmp_text.append(lem1)
-        #             c_changed += 1
-        #         c += 1
-        #     self.text[index] = " ".join(build_tmp_text)
-        # print(float(c_changed) / c)
+        start = time.time()
+        now = start
+        
+        tokenizer = TweetTokenizer(reduce_len=True).tokenize
+        wordnet = nltk.WordNetLemmatizer()
+        c = 0
+        c_changed = 0
+        for index, text in enumerate(self.text):
+            build_tmp_text = []
+            for word in tokenizer(text):
+                lem1 = wordnet.lemmatize(word)
+                if word == lem1:
+                    lem2 = wordnet.lemmatize(word, pos='v')
+                    if word == lem2:
+                        build_tmp_text.append(word)
+                    else:
+                        build_tmp_text.append(lem2)
+                        c_changed += 1
+                else:
+                    build_tmp_text.append(lem1)
+                    c_changed += 1
+                c += 1
+            self.text[index] = " ".join(build_tmp_text)
+        print(float(c_changed) / c)
+        print('Lemmatization: ' + '%0.2f' % (time.time() - now))
+        now = time.time()
         # TODO: consider max features!!!
         vectorizer = TfidfVectorizer(strip_accents="unicode", analyzer="word", tokenizer=tokenizer,
-                                     stop_words="english", ngram_range=(1, 3), max_features=50000)
+                                     stop_words="english", ngram_range=(1, 2), min_df=2)
         X = csr_matrix(vectorizer.fit_transform(self.text))
+        feature_names = vectorizer.get_feature_names()
+        print('Tfidf: ' + '%0.2f' % (time.time() - now))
+
         print(X.shape)
         # to manually check if the tokens are reasonable
-        print(vectorizer.get_feature_names())  # to manually check if the tokens are reasonable
+        # print(vectorizer.get_feature_names())
 
-        now = time.time()
-        print('Featurize: ' + '%0.2f' % (time.time() - now))
+       
 
-        now = time.time()
-        floodingCharDict = self.character_flooding()
-        floodingPuncDict = self.punctuation_flooding()
-        print('Flooding: ' + '%0.2f' % (time.time() - now))
+        # now = time.time()
+        # floodingCharDict = self.character_flooding()
+        # floodingPuncDict = self.punctuation_flooding()
+        # print('Flooding: ' + '%0.2f' % (time.time() - now))
 
-        X = hstack([X, floodingCharDict])
-        X = hstack([X, floodingPuncDict])
+        # X = hstack([X, floodingCharDict])
+        # X = hstack([X, floodingPuncDict])
 
         now = time.time()
         sent = self.sentiment_features()
         print('Sentimality: ' + '%0.2f' % (time.time() - now))
         X = hstack([X, sent])
+        feature_names += ['@overall_score', '@difference', '@polarity']
 
         # seman = self.semantic_features()
         # print('Semantic: ' + '%0.2f' % (time.time() - now))
         # X = hstack([X, seman])
 
         # add number of words (scaled 0-1)
-        # lyrcs_lengths = self.word_counter(tokenizer=tokenizer)
-        # X = hstack([X, lyrcs_lengths])
-        # print('word counting: ' + '%0.2f' % (time.time() - now))
+        lyrcs_lengths = self.word_counter(tokenizer=tokenizer)
+        X = hstack([X, lyrcs_lengths])
+        feature_names += ['@length', '@unique_words', '@unique_ratio'] 
+        print('word counting: ' + '%0.2f' % (time.time() - now))
 
         # add year binarized
         # years = self.get_years()
         # X = hstack([X, years])
-
-        return X
+        print('Total featurize: ' + '%0.2f' % (time.time() - start))
+        return X, feature_names
 
 
 def get_predict_topn(y_true, y_pred, topn=2):
@@ -319,29 +286,37 @@ def get_predict_topn(y_true, y_pred, topn=2):
             new_predict.append(top2[0])
     return np.array(new_predict)
 
+def print_top10_features(feature_names, clf, class_labels):
+    """Prints features with the highest coefficient values, per class"""
+    for i, class_label in enumerate(class_labels):
+        top10 = np.argsort(clf.coef_[i])[-10:]
+        print('%s: %s' % (class_label,
+              ', '.join(feature_names[j] for j in top10)))
+
 if __name__ == "__main__":
     # Experiment settings
     print('--- Started ----')
     DATASET_FP = "data/preprocessed_fixed.csv"
 
-    K_FOLDS = 3  # crossvalidation
+    K_FOLDS = 5  # crossvalidation
 
     # Loading dataset and featurised simple Tfidf-BoW model
     idt = LyricsAnalysis(DATASET_FP)
     # corpus, y = idt.parse_dataset_old(DATASET_FP)
 
-    X = idt.featurize()
+    X, feature_names = idt.featurize()
 
-    test = X.tocsr()[:100,:]
-    train = X.tocsr()[len(idt.y) - 100:, :]
-    train_y = idt.y[len(idt.y)-100:] 
-    test_y = idt.y[:100] 
+    train = X.tocsr()[0:idt.splitIdx, :]
+    train_y = idt.y[0:idt.splitIdx] 
+
+    test = X.tocsr()[idt.splitIdx:,:]
+    test_y = idt.y[idt.splitIdx:] 
 
     class_counts = np.asarray(np.unique(idt.y, return_counts=True)).T.tolist()
     # print("Num of classes: ", class_counts)
 
-    # method = "predict"
-    method = "predict_proba"
+    method = "predict"
+    # method = "predict_proba"
     if method == "predict_proba":
         algs = [svm.SVC(kernel='linear', probability=True)]
     else:
@@ -350,34 +325,28 @@ if __name__ == "__main__":
 
     for CLF in algs:
         print(CLF.__class__.__name__)
+        now = time.time()
         # CLF = LinearSVC(multi_class="crammer_singer")  # the default, non-parameter optimized linear-kernel SVM
 
-        # SVM with created features - currently uses only tokenized words.
-        CLF.fit(train, train_y)
-        predicted = CLF.predict(test)
-
-        # predicted = cross_val_predict(CLF, X, idt.y, cv=K_FOLDS, method=method)
+        # CLF.fit(train, train_y)
+        predicted = cross_val_predict(CLF, X, idt.y, cv=K_FOLDS, method=method)
         # print(predicted)
         # sys.exit(1)
+        cm_labels = ['country', 'dance', 'hiphop', 'pop', 'rock', 'soul']
+        # print_top10_features(feature_names,CLF, cm_labels)
         randpred = np.random.randint(
             len(np.unique(idt.y)), size=len(predicted))
 
-        # if method == "predict_proba":
-        #     predicted = get_predict_topn(test_y, predicted, 2)
+        if method == "predict_proba":
+            predicted = get_predict_topn(idt.y, predicted, 2)
 
-        cm_labels = ['country', 'dance', 'hiphop', 'pop', 'rock', 'soul']
-        conf_matrix = confusion_matrix(test_y, predicted)
-        plot_cm(conf_matrix,cm_labels, CLF.__class__.__name__, True)
-
-        # acc = metrics.accuracy_score(idt.y, randpred)
-        acc = metrics.accuracy_score(test_y, randpred)
-        prec = metrics.precision_recall_fscore_support(test_y, randpred)
+        acc = metrics.accuracy_score(idt.y, randpred)
+        prec = metrics.precision_recall_fscore_support(idt.y, randpred)
 
         print("Random classifier:")
         print('Accuracy', acc, '| Precision', np.mean(
             prec[0]), '| Recall', np.mean(prec[1]), '| F-score', np.mean(prec[2]))
-        # Modify F1-score calculation depending on the task
-        # acc = metrics.accuracy_score(idt.y, predicted)
+
         acc = metrics.accuracy_score(idt.y, predicted)
         prec = metrics.precision_recall_fscore_support(idt.y, predicted)
 
@@ -387,6 +356,10 @@ if __name__ == "__main__":
         print('Full')
         print('Accuracy', acc, '| Precision', np.mean(prec[0]), '| Recall', np.mean(prec[1]), '| F-score',
               np.mean(prec[2]))
-        # Modify F1-score calculation depending on the task
+
         acc = metrics.accuracy_score(idt.y, predicted)
         prec = metrics.precision_recall_fscore_support(idt.y, predicted)
+
+     
+        conf_matrix = confusion_matrix(idt.y, predicted)
+        plot_cm(conf_matrix,cm_labels, CLF.__class__.__name__, True)
