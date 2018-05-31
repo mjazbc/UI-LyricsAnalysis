@@ -7,8 +7,9 @@ import nltk
 import numpy as np
 import pandas as pd
 import wordninja
+import gensim
 from gensim.models import Word2Vec
-from nltk.corpus import words
+from nltk.corpus import words, brown
 from nltk.sentiment.vader import SentimentIntensityAnalyzer, negated
 from nltk.tokenize import TweetTokenizer
 from scipy.sparse import csr_matrix, hstack
@@ -73,7 +74,7 @@ class LyricsAnalysis:
 
         df = pd.read_csv(fp, delimiter=";")
         df = df[df.genre != 'other']
-        # df = df.head(1000)
+        # df = df.head(100)
         print(df[class_name].value_counts())
         self.corpus = pd.Series(df.lyrics.values).to_dict()
         le = preprocessing.LabelEncoder().fit(df[class_name])
@@ -99,9 +100,38 @@ class LyricsAnalysis:
 
     # SEMANTIC
 
-    def word2vecVectorizer(self, text, n):
-        return np.array([np.mean([self.w2v[w] for w in text if w in self.w2v]
-                                 or [np.zeros(n)], axis=0)])
+    def word2vecVectorizer(self):
+        sentencesData=[] #vocabulary
+        for g in self.tokenized.values():
+            sentencesData.append(set(g))
+        
+        sentencesData.append(words.words())
+
+        model = gensim.models.Word2Vec(sentencesData, size=50,window=5,min_count=5)
+        vocab=model.wv.vocab
+        vocab=(set(vocab))
+        word2vecTokens=[] #word2vec for all the data
+
+        for g in self.tokenized.values(): #running loop over all the tokens
+            vc=[] #to store temp vector for each token in an instance
+            for s in g:
+                if (s in vocab):
+                    vc.append(model.wv[s])
+            word2vecTokens.append(vc) # appending all the vectors of an instance
+        
+        g=[]
+        for i in range (len(word2vecTokens)):
+            g.append(np.sum(word2vecTokens[i], axis=0)/len(word2vecTokens[i]))
+
+        return np.matrix(g)
+        # columns=[]
+        # index=[]
+        # for k in range(0,80000):
+        #     index.append(k)
+        # for i in range(1,51):
+        #     columns.append("w2v_"+str(i))
+        # dar=pd.DataFrame(g,columns=columns)
+        # dar.head()
 
     def semantic_features(self, n=200):
         res = csr_matrix((len(self.tokenized), n))
@@ -234,7 +264,7 @@ class LyricsAnalysis:
         now = time.time()
         # TODO: consider max features!!!
         vectorizer = TfidfVectorizer(strip_accents="unicode", analyzer="word", tokenizer=tokenizer,
-                                     stop_words="english", ngram_range=(1, 2), min_df=2)
+                                     stop_words="english", ngram_range=(1, 2), min_df = 2)
         X = csr_matrix(vectorizer.fit_transform(self.text))
         feature_names = vectorizer.get_feature_names()
         print('Tfidf: ' + '%0.2f' % (time.time() - now))
@@ -242,8 +272,6 @@ class LyricsAnalysis:
         print(X.shape)
         # to manually check if the tokens are reasonable
         # print(vectorizer.get_feature_names())
-
-       
 
         # now = time.time()
         # floodingCharDict = self.character_flooding()
@@ -272,6 +300,11 @@ class LyricsAnalysis:
         # add year binarized
         # years = self.get_years()
         # X = hstack([X, years])
+
+        w2v = self.word2vecVectorizer()
+
+        X = hstack([X, w2v])
+        feature_names += ['w2v_'+str(i) for i in range(50)]
         print('Total featurize: ' + '%0.2f' % (time.time() - start))
         return X, feature_names
 
@@ -303,6 +336,8 @@ if __name__ == "__main__":
     # Loading dataset and featurised simple Tfidf-BoW model
     idt = LyricsAnalysis(DATASET_FP)
     # corpus, y = idt.parse_dataset_old(DATASET_FP)
+
+    # vecs = idt.word2vecVectorizer()
 
     X, feature_names = idt.featurize()
 
