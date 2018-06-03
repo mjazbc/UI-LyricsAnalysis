@@ -15,12 +15,35 @@ from sklearn.cluster import KMeans
 import matplotlib
 
 
+def draw_length_histogram(lyrics_lengths, filename):
+    plt.clf()
+    print(sorted(set(lyrics_lengths)))
+    print(np.mean(lyrics_lengths))
+    print(max(lyrics_lengths))
+    bins = np.arange(0, 6500, 100)
+    lyrics_lengths = np.nan_to_num(lyrics_lengths)
+    plt.hist(lyrics_lengths, bins, histtype='bar', rwidth=0.8)
+    plt.axvline(100, color='r', linestyle='dashed', linewidth=1)
+    plt.xlabel("lengths")
+    plt.tight_layout()
+    ylims = plt.ylim()
+    plt.ylim((0.1, ylims[1]))
+
+    plt.savefig(filename)
+
+
 def prepare_data(path, columns, save_to_path):
     # check if we need sentinels!
     _df = pd.read_csv(path, names=columns, skiprows=1)
 
+    print("whole")
+    print(len(_df))
     lyrics_lenghts = _df.lyrics.str.len()
     empty_genre = _df.genre.notnull()  # if all five tags are empty, genre is NaN
+    print("empty genre")
+    print(len(_df) - len(_df.loc[empty_genre]))
+    print("<100 chars")
+    print(len(_df.loc[lyrics_lenghts < 100.]))
     mask = (lyrics_lenghts > 100.) & empty_genre
     drop_columns = ['rank', 'tag1', 'tag2', 'tag3', 'tag4', 'tag5', 'source']
     drop_duplicates_by_columns = ['song', 'artist']
@@ -39,17 +62,15 @@ def prepare_data(path, columns, save_to_path):
     print(len(_df))
     print(len(df))
 
-    # hist = _df.lyrics.str.len().diff().hist()
-    # plt.show()
-    # hist2 = df.lyrics.str.len().diff().hist()
-    # plt.show()
+    draw_length_histogram(_df.lyrics.str.len(), "original_lengths.png")
+    draw_length_histogram(df.lyrics.str.len(), "filtered_lengths.png")
 
     # just checking if data makes sense
     print(pd.unique(df.genre.values))
     print(pd.unique(df.era.values))
     print(pd.unique(df.year.values))
 
-    df.to_csv(save_to_path, sep=";")
+    # df.to_csv(save_to_path, sep=";")
 
 
 def word_tuples(s, k):
@@ -109,8 +130,8 @@ if __name__ == "__main__":
     # data preprocess
     clmns = ["rank", "song", "artist", "year", "lyrics", "source",
              "tag1", "tag2", "tag3", "tag4", "tag5", "genre", "era"]
-    # prepare_data(path="data/billboard_lyrics_1964-2017_tagged.csv", columns=clmns, save_to_path="data/preprocessed.csv")
-    # sys.exit(1)
+    prepare_data(path="data/billboard_lyrics_1964-2017_tagged.csv", columns=clmns, save_to_path="data/preprocessed.csv")
+    sys.exit(1)
 
     df = pd.read_csv("data/preprocessed.csv", sep=';')
     df = df[:100]

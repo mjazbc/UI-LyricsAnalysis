@@ -212,6 +212,21 @@ class LyricsAnalysis:
         for i in range(len(s) - k + 1):
             yield tuple(s[i:i + k])
 
+    def punctuation_flooding(self):
+        # res = [[0] for x in range(len(self.tokenized))]
+        res = csr_matrix((len(self.tokenized), 1))
+        regex = re.compile(
+            r'([.\?#@+,<>%~`!$^&\(\):;]|[.\?#@+,<>%~`!$^&\(\):;]\s)\1+')
+
+        for id, text in self.corpus.items():
+            is_flooded = 0
+            match = regex.search(text)
+            if match:
+                is_flooded = 1
+            res[id] = is_flooded
+
+        return res
+
     def word_counter(self, tokenizer):
         cntr = csr_matrix((len(self.text), 3))
         for id, lrcs in enumerate(self.text):
@@ -238,7 +253,7 @@ class LyricsAnalysis:
         '''
         start = time.time()
         now = start
-        
+
         tokenizer = TweetTokenizer(reduce_len=True).tokenize
         wordnet = nltk.WordNetLemmatizer()
         c = 0
@@ -294,7 +309,7 @@ class LyricsAnalysis:
         # add number of words (scaled 0-1)
         lyrcs_lengths = self.word_counter(tokenizer=tokenizer)
         X = hstack([X, lyrcs_lengths])
-        feature_names += ['@length', '@unique_words', '@unique_ratio'] 
+        feature_names += ['@length', '@unique_words', '@unique_ratio']
         print('word counting: ' + '%0.2f' % (time.time() - now))
 
         # add year binarized
@@ -319,12 +334,14 @@ def get_predict_topn(y_true, y_pred, topn=2):
             new_predict.append(top2[0])
     return np.array(new_predict)
 
+
 def print_top10_features(feature_names, clf, class_labels):
     """Prints features with the highest coefficient values, per class"""
     for i, class_label in enumerate(class_labels):
         top10 = np.argsort(clf.coef_[i])[-10:]
         print('%s: %s' % (class_label,
               ', '.join(feature_names[j] for j in top10)))
+
 
 if __name__ == "__main__":
     # Experiment settings
@@ -342,16 +359,16 @@ if __name__ == "__main__":
     X, feature_names = idt.featurize()
 
     train = X.tocsr()[0:idt.splitIdx, :]
-    train_y = idt.y[0:idt.splitIdx] 
+    train_y = idt.y[0:idt.splitIdx]
 
     test = X.tocsr()[idt.splitIdx:,:]
-    test_y = idt.y[idt.splitIdx:] 
+    test_y = idt.y[idt.splitIdx:]
 
     class_counts = np.asarray(np.unique(idt.y, return_counts=True)).T.tolist()
     # print("Num of classes: ", class_counts)
 
-    method = "predict"
-    # method = "predict_proba"
+    # method = "predict"
+    method = "predict_proba"
     if method == "predict_proba":
         algs = [svm.SVC(kernel='linear', probability=True)]
     else:
