@@ -15,6 +15,7 @@ from nltk.tokenize import TweetTokenizer
 from scipy.sparse import csr_matrix, hstack
 from sklearn import metrics, preprocessing
 from sklearn import svm
+from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import confusion_matrix
@@ -22,13 +23,14 @@ from sklearn.model_selection import cross_val_predict
 from sklearn.preprocessing import normalize, MultiLabelBinarizer, label_binarize
 from sklearn.svm import LinearSVC
 import matplotlib.pyplot as plt
+import xgboost as xgb
 
 
 # nltk.download('averaged_perceptron_tagger')
 # nltk.download('vader_lexicon')
 # nltk.download('words')
 
-logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.INFO)
 
 
 def save_obj(obj, name):
@@ -41,7 +43,7 @@ def load_obj(path):
     return pickle.load(open(path, 'rb'))
 
 
-def plot_cm(cm, labels, classifier, normalize=True):
+def plot_cm(cm, labels, classifier, normalize=True, filename=""):
 
     print(cm)
     
@@ -57,7 +59,7 @@ def plot_cm(cm, labels, classifier, normalize=True):
     ax.set_yticklabels([''] + cm_labels)
     plt.xlabel('Predicted')
     plt.ylabel('True')
-    plt.show()
+    plt.savefig(filename)
 
 
 class LyricsAnalysis:
@@ -88,6 +90,10 @@ class LyricsAnalysis:
         print('Preprocessing: ' + '%0.2f' % (time.time() - now))
 
         self.sid = SentimentIntensityAnalyzer()
+
+        self.songs = df.song.values
+        self.genre = df.genre.values
+        self.artist = df.artist.values
 
     def ie_preprocess(self):
         tokenizer = TweetTokenizer(reduce_len=True)
@@ -245,7 +251,7 @@ class LyricsAnalysis:
 
     # FEATURIZING
 
-    def featurize(self):
+    def featurize(self, bow):
         '''
         Tokenizes and creates TF-IDF BoW vectors.
         :param corpus: A list of strings each string representing document.
@@ -279,7 +285,7 @@ class LyricsAnalysis:
         now = time.time()
         # TODO: consider max features!!!
         vectorizer = TfidfVectorizer(strip_accents="unicode", analyzer="word", tokenizer=tokenizer,
-                                     stop_words="english", ngram_range=(1, 2), min_df = 2)
+                                     stop_words="english", ngram_range=bow, min_df=2)
         X = csr_matrix(vectorizer.fit_transform(self.text))
         feature_names = vectorizer.get_feature_names()
         print('Tfidf: ' + '%0.2f' % (time.time() - now))
@@ -324,23 +330,43 @@ class LyricsAnalysis:
         return X, feature_names
 
 
-def get_predict_topn(y_true, y_pred, topn=2):
+def get_predict_topn(y_true, y_pred, topn=None, topnprob=0.1):
+    """If topn set (integer), it will return predict array based on absolute topN elements.
+       If topnprob set (float), return predict array based on relative (10%) topN elements."""
     new_predict = []
     for row, pred in enumerate(y_pred):
-        top2 = pred.argsort()[-topn:][::-1]
-        if y_true[row] in top2:
-            new_predict.append(y_true[row])
+        if topn:
+            top2 = pred.argsort()[-topn:][::-1]
+            if y_true[row] in top2:
+                new_predict.append(y_true[row])
+            else:
+                new_predict.append(top2[0])
         else:
-            new_predict.append(top2[0])
+            top1 = pred.argsort()[-1:][0]
+            topnprobs = np.where(y_pred[row] > y_pred[row, top1] - topnprob)[0]
+            if y_true[row] in topnprobs:
+                new_predict.append(y_true[row])
+            else:
+                new_predict.append(top1)
     return np.array(new_predict)
+
+
+def get_errors(y_true, y_pred):
+    errs = []
+    for row, pred in enumerate(y_pred):
+        pred_class = pred.argsort()[-1:][0]
+        if pred_class != y_true[row]:
+            errs.append(y_pred[row, pred_class] - y_pred[row, y_true[row]])
+        else:
+            errs.append(0)
+    return errs
 
 
 def print_top10_features(feature_names, clf, class_labels):
     """Prints features with the highest coefficient values, per class"""
     for i, class_label in enumerate(class_labels):
         top10 = np.argsort(clf.coef_[i])[-10:]
-        print('%s: %s' % (class_label,
-              ', '.join(feature_names[j] for j in top10)))
+        print('%s: %s' % (class_label, ', '.join(feature_names[j] for j in top10)))
 
 
 if __name__ == "__main__":
@@ -348,50 +374,40 @@ if __name__ == "__main__":
     print('--- Started ----')
     DATASET_FP = "data/preprocessed_fixed.csv"
 
-    K_FOLDS = 5  # crossvalidation
+    K_FOLDS = 10  # crossvalidation
 
-    # Loading dataset and featurised simple Tfidf-BoW model
-    idt = LyricsAnalysis(DATASET_FP)
-    # corpus, y = idt.parse_dataset_old(DATASET_FP)
+    TOPNERR = 0.0
 
-    # vecs = idt.word2vecVectorizer()
+    for bow in [(1, 1), (2, 2), (1, 2), (3, 3), (1, 3)]:
+        print(bow)
+        # Loading dataset and featurised simple Tfidf-BoW model
+        idt = LyricsAnalysis(DATASET_FP)
+        # corpus, y = idt.parse_dataset_old(DATASET_FP)
 
-    X, feature_names = idt.featurize()
+        # vecs = idt.word2vecVectorizer()
 
-    train = X.tocsr()[0:idt.splitIdx, :]
-    train_y = idt.y[0:idt.splitIdx]
+        X, feature_names = idt.featurize(bow=bow)
 
-    test = X.tocsr()[idt.splitIdx:,:]
-    test_y = idt.y[idt.splitIdx:]
+        train = X.tocsr()[0:idt.splitIdx, :]
+        train_y = idt.y[0:idt.splitIdx]
 
-    class_counts = np.asarray(np.unique(idt.y, return_counts=True)).T.tolist()
-    # print("Num of classes: ", class_counts)
+        test = X.tocsr()[idt.splitIdx:,:]
+        test_y = idt.y[idt.splitIdx:]
 
-    # method = "predict"
-    method = "predict_proba"
-    if method == "predict_proba":
-        algs = [svm.SVC(kernel='linear', probability=True)]
-    else:
-        algs = [svm.SVC(kernel='linear', probability=False)]
-        # algs = [LinearSVC(multi_class="crammer_singer")]
+        class_counts = np.asarray(np.unique(idt.y, return_counts=True)).T.tolist()
+        # print("Num of classes: ", class_counts)
 
-    for CLF in algs:
-        print(CLF.__class__.__name__)
-        now = time.time()
-        # CLF = LinearSVC(multi_class="crammer_singer")  # the default, non-parameter optimized linear-kernel SVM
-
-        # CLF.fit(train, train_y)
-        predicted = cross_val_predict(CLF, X, idt.y, cv=K_FOLDS, method=method)
-        # print(predicted)
-        # sys.exit(1)
-        cm_labels = ['country', 'dance', 'hiphop', 'pop', 'rock', 'soul']
-        # print_top10_features(feature_names,CLF, cm_labels)
-        randpred = np.random.randint(
-            len(np.unique(idt.y)), size=len(predicted))
-
+        # method = "predict"
+        method = "predict_proba"
         if method == "predict_proba":
-            predicted = get_predict_topn(idt.y, predicted, 2)
+            algs = [svm.SVC(kernel='linear', probability=True), RandomForestClassifier(n_estimators=1000, n_jobs=-1), svm.SVC(kernel='rbf', probability=True)]
+            algs_names = ["svc_linear", "rf", "svc_rbf"]
+        else:
+            algs = [svm.SVC(kernel='linear', probability=False)]
+            algs_names = ["svc_linear"]
+            # algs = [LinearSVC(multi_class="crammer_singer")]
 
+        randpred = np.random.randint(len(np.unique(idt.y)), size=len(idt.y))
         acc = metrics.accuracy_score(idt.y, randpred)
         prec = metrics.precision_recall_fscore_support(idt.y, randpred)
 
@@ -399,19 +415,42 @@ if __name__ == "__main__":
         print('Accuracy', acc, '| Precision', np.mean(
             prec[0]), '| Recall', np.mean(prec[1]), '| F-score', np.mean(prec[2]))
 
-        acc = metrics.accuracy_score(idt.y, predicted)
-        prec = metrics.precision_recall_fscore_support(idt.y, predicted)
+        DUMMYCLF = DummyClassifier(strategy="constant", constant=3)
+        majority_predict = cross_val_predict(DUMMYCLF, X, idt.y, cv=10, method="predict")
+        acc = metrics.accuracy_score(idt.y, majority_predict)
+        prec = metrics.precision_recall_fscore_support(idt.y, majority_predict)
 
-        acc = metrics.accuracy_score(idt.y, predicted)
-        prec = metrics.precision_recall_fscore_support(idt.y, predicted)
+        print()
+        print("Dummy classifier majority:")
+        print('Accuracy', acc, '| Precision', np.mean(
+            prec[0]), '| Recall', np.mean(prec[1]), '| F-score', np.mean(prec[2]))
 
-        print('Full')
-        print('Accuracy', acc, '| Precision', np.mean(prec[0]), '| Recall', np.mean(prec[1]), '| F-score',
-              np.mean(prec[2]))
+        for alg_idx, CLF in enumerate(algs):
+            print(CLF.__class__.__name__)
+            now = time.time()
 
-        acc = metrics.accuracy_score(idt.y, predicted)
-        prec = metrics.precision_recall_fscore_support(idt.y, predicted)
+            predicted = cross_val_predict(CLF, X, idt.y, cv=K_FOLDS, method=method)
+            cm_labels = ['country', 'dance', 'hiphop', 'pop', 'rock', 'soul']
+            # print_top10_features(feature_names,CLF, cm_labels)
 
-     
-        conf_matrix = confusion_matrix(idt.y, predicted)
-        plot_cm(conf_matrix,cm_labels, CLF.__class__.__name__, True)
+            if method == "predict_proba":
+                # predicted = get_predict_topn(idt.y, predicted, topn=2)
+                prob_errors = pd.Series(get_errors(idt.y, predicted))
+                predicted = get_predict_topn(idt.y, predicted, topnprob=TOPNERR)
+                print("average err: %.4f" % np.mean(prob_errors))
+                print("10 largest errors:")
+                for idx, err in prob_errors.nlargest(10).iteritems():
+                    print("\t%s, %s, %s, %s, %.3f" % (idt.songs[idx], idt.artist[idx], idt.genre[idx], cm_labels[predicted[idx]], err))
+
+            acc = metrics.accuracy_score(idt.y, predicted)
+            prec = metrics.precision_recall_fscore_support(idt.y, predicted)
+
+            print('Full')
+            print('Accuracy', acc, '| Precision', np.mean(prec[0]), '| Recall', np.mean(prec[1]), '| F-score',
+                  np.mean(prec[2]))
+
+            acc = metrics.accuracy_score(idt.y, predicted)
+            prec = metrics.precision_recall_fscore_support(idt.y, predicted)
+
+            conf_matrix = confusion_matrix(idt.y, predicted)
+            plot_cm(conf_matrix, cm_labels, CLF.__class__.__name__, True, "new_cm_%s_%.0f_bow%d-%d.png" % (algs_names[alg_idx], TOPNERR*100, bow[0], bow[-1]))
